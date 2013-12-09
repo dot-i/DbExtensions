@@ -190,6 +190,10 @@ namespace DbExtensions {
             return OrderBySkipTake_SqlServer(take);
          }
 
+         if (IsOracle()) {
+            return OrderBySkipTake_Oracle(take);
+         }
+
          return OrderBySkipTake_Default(take);
       }
 
@@ -275,9 +279,49 @@ namespace DbExtensions {
          return null;
       }
 
+      SqlBuilder OrderBySkipTake_Oracle(int? take = null) { 
+         
+         bool hasOrderBy = this.orderByBuffer != null;
+         bool hasSkip = this.skipBuffer.HasValue;
+         bool hasTake = take.HasValue;
+
+         if (hasSkip || hasTake) {
+
+            string queryAlias = "__set" + this.setIndex.ToString(CultureInfo.InvariantCulture);
+            
+            int start = (hasSkip) ? this.skipBuffer.Value : 0;
+            int? end = (hasTake) ? start + take.Value : default(int?); 
+
+            var query = new SqlBuilder()
+               .SELECT(String.Concat("ROW_NUMBER() OVER (ORDER BY ", (hasOrderBy) ? this.orderByBuffer.Format : "1", ") AS __rowNumber"), (hasOrderBy) ? this.orderByBuffer.Args : null)
+               ._(queryAlias + ".*")
+               .FROM(this.definingQuery, queryAlias)
+               .WHERE("__rowNumber > {0}", start)
+                  ._If(end.HasValue, "__rowNumber < {1}", end)
+               .ORDER_BY("__rowNumber");
+
+            return query;
+         }
+
+         if (hasOrderBy) {
+
+            SqlBuilder query = CreateSuperQuery(this.definingQuery, null, null);
+
+            query.ORDER_BY(this.orderByBuffer.Format, this.orderByBuffer.Args);
+
+            return query;
+         }
+
+         return null;
+      }
+
       bool IsSqlServer() {
          return this.Connection is System.Data.SqlClient.SqlConnection
             || this.Connection.GetType().Namespace.Equals("System.Data.SqlServerCe", StringComparison.Ordinal);
+      }
+
+      bool IsOracle() {
+         return this.Connection.GetType().Namespace.Equals("System.Data.OracleClient", StringComparison.Ordinal);
       }
 
       protected SqlBuilder CreateSuperQuery() {
