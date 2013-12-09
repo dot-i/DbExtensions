@@ -32,6 +32,8 @@ namespace DbExtensions {
    [DebuggerDisplay("{definingQuery}")]
    public partial class SqlSet : ISqlSet<SqlSet, object> {
 
+      const string SetAliasPrefix = "dbex_set";
+
       // definingQuery should NEVER be modified
 
       readonly SqlBuilder definingQuery;
@@ -287,18 +289,29 @@ namespace DbExtensions {
 
          if (hasSkip || hasTake) {
 
-            string queryAlias = "__set" + this.setIndex.ToString(CultureInfo.InvariantCulture);
-            
-            int start = (hasSkip) ? this.skipBuffer.Value : 0;
+            string queryAlias = SetAliasPrefix + this.setIndex.ToString(CultureInfo.InvariantCulture);
+            string innerQueryAlias = queryAlias + "_1";
+            string rowNumberAlias = "dbex_rn";
+
+            int start = ((hasSkip) ? this.skipBuffer.Value : 0);
             int? end = (hasTake) ? start + take.Value : default(int?); 
 
             var query = new SqlBuilder()
-               .SELECT(String.Concat("ROW_NUMBER() OVER (ORDER BY ", (hasOrderBy) ? this.orderByBuffer.Format : "1", ") AS __rowNumber"), (hasOrderBy) ? this.orderByBuffer.Args : null)
-               ._(queryAlias + ".*")
-               .FROM(this.definingQuery, queryAlias)
-               .WHERE("__rowNumber > {0}", start)
-                  ._If(end.HasValue, "__rowNumber < {1}", end)
-               .ORDER_BY("__rowNumber");
+               .SELECT("*")
+               .FROM(new SqlBuilder()
+                  .SELECT(String.Concat("ROW_NUMBER() OVER (ORDER BY ", (hasOrderBy) ? this.orderByBuffer.Format : "1", ") AS " + rowNumberAlias), (hasOrderBy) ? this.orderByBuffer.Args : null)
+                  ._(innerQueryAlias + ".*")
+                  .FROM(this.definingQuery, innerQueryAlias)
+               , queryAlias);
+
+            if (end.HasValue) {
+               query.WHERE(rowNumberAlias + " BETWEEN {0} AND {1}", (start + 1), end.Value);
+            
+            } else {
+               query.WHERE(rowNumberAlias + " > {0}", start);
+            }
+
+            query.ORDER_BY(rowNumberAlias);
 
             return query;
          }
@@ -336,7 +349,7 @@ namespace DbExtensions {
 
          var query = new SqlBuilder()
             .SELECT(selectFormat ?? "*", args)
-            .FROM(definingQuery, "__set" + this.setIndex.ToString(CultureInfo.InvariantCulture));
+            .FROM(definingQuery, SetAliasPrefix + this.setIndex.ToString(CultureInfo.InvariantCulture));
 
          return query;
       }
