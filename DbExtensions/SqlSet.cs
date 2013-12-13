@@ -293,16 +293,29 @@ namespace DbExtensions {
             string innerQueryAlias = queryAlias + "_1";
             string rowNumberAlias = "dbex_rn";
 
-            int start = ((hasSkip) ? this.skipBuffer.Value : 0);
-            int? end = (hasTake) ? start + take.Value : default(int?); 
+            int start = (hasSkip) ? this.skipBuffer.Value : 0;
+            int? end = (hasTake) ? start + take.Value : default(int?);
+
+            var innerQuery = new SqlBuilder();
+
+            if (hasOrderBy) {
+
+               innerQuery
+                  .SELECT(String.Concat("ROW_NUMBER() OVER (ORDER BY ", this.orderByBuffer.Format, ") AS " + rowNumberAlias), this.orderByBuffer.Args);
+            
+            } else {
+
+               innerQuery
+                  .SELECT("ROWNUM AS " + rowNumberAlias);
+            }
+
+            innerQuery
+               .SELECT(innerQueryAlias + ".*")
+               .FROM(this.definingQuery, innerQueryAlias);
 
             var query = new SqlBuilder()
                .SELECT("*")
-               .FROM(new SqlBuilder()
-                  .SELECT(String.Concat("ROW_NUMBER() OVER (ORDER BY ", (hasOrderBy) ? this.orderByBuffer.Format : "1", ") AS " + rowNumberAlias), (hasOrderBy) ? this.orderByBuffer.Args : null)
-                  ._(innerQueryAlias + ".*")
-                  .FROM(this.definingQuery, innerQueryAlias)
-               , queryAlias);
+               .FROM(innerQuery, queryAlias);
 
             if (end.HasValue) {
                query.WHERE(rowNumberAlias + " BETWEEN {0} AND {1}", (start + 1), end.Value);
